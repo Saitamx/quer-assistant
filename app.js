@@ -52,7 +52,13 @@ app.post("/chat", async (req, res) => {
     return res.status(400).json({ error: "Missing thread_id" });
   }
 
+  // Declarando la variable para almacenar la respuesta de la clasificación
+  let colorResponse;
+
   try {
+    colorResponse = await handleClassifyQuestion(message);
+    console.log("/chat colorResponse:", colorResponse);
+
     await axiosInstance.post(
       `https://api.openai.com/v1/threads/${thread_id}/messages`,
       { role: "user", content: message }
@@ -62,10 +68,11 @@ app.post("/chat", async (req, res) => {
       `https://api.openai.com/v1/threads/${thread_id}/runs`,
       { assistant_id: assistantId }
     );
-    console.log(`Run initiated with ID: ${response.data.id}`);
-    console.log({ run_id: response.data.id, status: "in_progress" });
+    console.log(
+      `/chat response.data.id Run initiated with ID ${response.data.id}`
+    );
 
-    handleResponseInBackground(thread_id, response.data.id, res);
+    handleResponseInBackground(thread_id, response.data.id, res, colorResponse);
   } catch (error) {
     console.error("Error in chat:", error.response || error);
     res.status(500).send("Error in chat");
@@ -73,7 +80,7 @@ app.post("/chat", async (req, res) => {
 });
 
 // Función para manejar la respuesta en segundo plano
-async function handleResponseInBackground(thread_id, run_id, res) {
+async function handleResponseInBackground(thread_id, run_id, res, color) {
   let runStatus;
   let attempts = 0;
   const maxAttempts = 12; // Ajustado según el tiempo de respuesta máximo esperado
@@ -92,7 +99,7 @@ async function handleResponseInBackground(thread_id, run_id, res) {
       runStatus = statusResponse.data.status;
 
       if (runStatus === "completed") {
-        res.status(200).json({ messages: messagesResponse.data });
+        res.status(200).json({ messages: messagesResponse.data, color });
         return;
       }
     } catch (error) {
@@ -111,6 +118,45 @@ async function handleResponseInBackground(thread_id, run_id, res) {
       .send("Timeout: La respuesta del asistente tardó demasiado.");
   }
 }
+
+// Clasificación de preguntas con modelo llm
+const handleClassifyQuestion = async (question) => {
+  const prompt = `Pregunta: "${question}"\n La pregunta anterior, ¿esta relacionada con alguno de estos 4 colores?: azul, rojo, rosado, amarillo. Responde en una sola palabra el color que creas que esta relacionado con la pregunta anterior.`;
+  let response = await axios.post(
+    process.env.CHAT_SERVICE,
+    {
+      model: "gpt-3.5-turbo",
+      messages: [
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+      temperature: 0.0, // Usar un valor bajo para obtener respuestas más consistentes
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+    }
+  );
+
+  console.log("handleClassifyQuestion prompt", prompt);
+  console.log(
+    "handleClassifyQuestion response.data",
+    response.data?.choices[0]?.message["content"]
+  );
+
+  response = response.data?.choices[0]?.message["content"].toLowerCase();
+
+  return response === "azul" ||
+    response === "rojo" ||
+    response === "rosado" ||
+    response === "amarillo"
+    ? response
+    : false;
+};
 
 // Configurando el puerto y poniendo en marcha el servidor
 const PORT = process.env.PORT || 8080;
