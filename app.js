@@ -75,9 +75,12 @@ app.post("/chat", async (req, res) => {
 // Función para manejar la respuesta en segundo plano
 async function handleResponseInBackground(thread_id, run_id, res) {
   let runStatus;
+  let attempts = 0;
+  const maxAttempts = 12; // Ajustado según el tiempo de respuesta máximo esperado
+  const interval = 2500; // Intervalo entre sondeos ajustado a 2.5 segundos
+
   do {
     try {
-      // Ejecutando consultas en paralelo
       const [statusResponse, messagesResponse] = await Promise.all([
         axiosInstance.get(
           `https://api.openai.com/v1/threads/${thread_id}/runs/${run_id}`
@@ -88,20 +91,25 @@ async function handleResponseInBackground(thread_id, run_id, res) {
       ]);
       runStatus = statusResponse.data.status;
 
-      // Si la ejecución está completada, enviar la respuesta
       if (runStatus === "completed") {
         res.status(200).json({ messages: messagesResponse.data });
         return;
       }
     } catch (error) {
-      console.log(error);
+      console.error("Error retrieving response:", error);
       res.status(500).send("Error retrieving response");
       return;
     }
 
-    // Esperando antes de la próxima verificación
-    await new Promise((resolve) => setTimeout(resolve, 1000));
-  } while (runStatus !== "completed");
+    await new Promise((resolve) => setTimeout(resolve, interval));
+    attempts++;
+  } while (runStatus !== "completed" && attempts < maxAttempts);
+
+  if (attempts >= maxAttempts) {
+    res
+      .status(503)
+      .send("Timeout: La respuesta del asistente tardó demasiado.");
+  }
 }
 
 // Configurando el puerto y poniendo en marcha el servidor
