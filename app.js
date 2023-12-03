@@ -52,12 +52,8 @@ app.post("/chat", async (req, res) => {
     return res.status(400).json({ error: "Missing thread_id" });
   }
 
-  // Declarando la variable para almacenar la respuesta de la clasificación
-  let colorResponse;
-
   try {
-    colorResponse = await handleClassifyQuestion(message);
-    console.log("/chat colorResponse:", colorResponse);
+    const colorResponse = await handleClassifyQuestion(message);
 
     await axiosInstance.post(
       `https://api.openai.com/v1/threads/${thread_id}/messages`,
@@ -68,11 +64,13 @@ app.post("/chat", async (req, res) => {
       `https://api.openai.com/v1/threads/${thread_id}/runs`,
       { assistant_id: assistantId }
     );
-    console.log(
-      `/chat response.data.id Run initiated with ID ${response.data.id}`
-    );
+    console.log(`Run initiated with ID: ${response.data.id}`);
 
-    handleResponseInBackground(thread_id, response.data.id, res, colorResponse);
+    const messagesResponse = await handleResponseInBackground(
+      thread_id,
+      response.data.id
+    );
+    res.status(200).json({ messages: messagesResponse, color: colorResponse });
   } catch (error) {
     console.error("Error in chat:", error.response || error);
     res.status(500).send("Error in chat");
@@ -80,11 +78,11 @@ app.post("/chat", async (req, res) => {
 });
 
 // Función para manejar la respuesta en segundo plano
-async function handleResponseInBackground(thread_id, run_id, res, color) {
+async function handleResponseInBackground(thread_id, run_id) {
   let runStatus;
   let attempts = 0;
-  const maxAttempts = 12; // Ajustado según el tiempo de respuesta máximo esperado
-  const interval = 2500; // Intervalo entre sondeos ajustado a 2.5 segundos
+  const maxAttempts = 12;
+  const interval = 2500;
 
   do {
     try {
@@ -99,23 +97,18 @@ async function handleResponseInBackground(thread_id, run_id, res, color) {
       runStatus = statusResponse.data.status;
 
       if (runStatus === "completed") {
-        res.status(200).json({ messages: messagesResponse.data, color });
-        return;
+        return messagesResponse.data;
       }
     } catch (error) {
       console.error("Error retrieving response:", error);
-      res.status(500).send("Error retrieving response");
-      return;
+      return { error: "Error retrieving response" };
     }
-
     await new Promise((resolve) => setTimeout(resolve, interval));
     attempts++;
   } while (runStatus !== "completed" && attempts < maxAttempts);
 
   if (attempts >= maxAttempts) {
-    res
-      .status(503)
-      .send("Timeout: La respuesta del asistente tardó demasiado.");
+    return { error: "Timeout: La respuesta del asistente tardó demasiado." };
   }
 }
 
@@ -132,7 +125,7 @@ const handleClassifyQuestion = async (question) => {
           content: prompt,
         },
       ],
-      temperature: 0.0, // Usar un valor bajo para obtener respuestas más consistentes
+      temperature: 0.0,
     },
     {
       headers: {
@@ -142,14 +135,7 @@ const handleClassifyQuestion = async (question) => {
     }
   );
 
-  console.log("handleClassifyQuestion prompt", prompt);
-  console.log(
-    "handleClassifyQuestion response.data",
-    response.data?.choices[0]?.message["content"]
-  );
-
   response = response.data?.choices[0]?.message["content"].toLowerCase();
-
   return response === "azul" ||
     response === "rojo" ||
     response === "rosado" ||
